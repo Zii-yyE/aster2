@@ -14,6 +14,12 @@ caster: dir
 sister: dir
 	g++ -std=c++20 -march=native -Ofast -D SISTER src/driver.cpp -o bin/sister
 
+caster-dist: dir
+	g++ -std=c++20 -march=native -Ofast src/caster-dist.cpp -o bin/caster-dist
+
+clean: dir
+	rm bin/*
+
 doc: all
 	mkdir -p doc
 	bin/caster -H > doc/caster.md

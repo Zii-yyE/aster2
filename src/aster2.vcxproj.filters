@@ -27,6 +27,12 @@
     <ClCompile Include="quadripartition_support.hpp">
       <Filter>头文件</Filter>
     </ClCompile>
+    <ClCompile Include="sister.hpp">
+      <Filter>头文件</Filter>
+    </ClCompile>
+    <ClCompile Include="caster-dist.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="common.hpp">
