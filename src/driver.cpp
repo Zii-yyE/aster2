@@ -1,6 +1,7 @@
 #include "driver.hpp"
 #include "optimization_algorithm.hpp"
 #include "quadripartition_support.hpp"
+#include "branch_length.hpp"
 
 #ifdef CASTER
 #include "caster.hpp"
@@ -101,6 +102,14 @@ int main(int argc, char* argv[]) {
 		}
 
 		ARG.log() << "Time after support annotation: " << (std::chrono::duration_cast<std::chrono::minutes>(Clock::now() - start)).count() << " minute(s)" << std::endl;
+
+		#ifdef CASTER
+		if constexpr(stepwise_colorable::QUADRIPARTITION_STEPWISE_COLORABLE<Color>) {
+			branch_length::Procedure<Color>::annotate(stepwiseColorSharedConstData, tree, nThreads, 0);
+		}
+		#endif
+
+		ARG.log() << "Time after branch-length annotation: " << (std::chrono::duration_cast<std::chrono::minutes>(Clock::now() - start)).count() << " minute(s)" << std::endl;
 
 		if (ARG.has("output")) {
 			std::ofstream fout(ARG.get<string>("output"));
