@@ -100,32 +100,93 @@ static void testProbabilitiesAndOptimizer() {
 	constexpr std::array<int, 15> multiplicity = {
 		4, 12, 12, 12, 24, 12, 12, 24, 12, 12, 24, 24, 24, 24, 24
 	};
-	auto probabilities = branch_length::jc69_msc::probabilities(
-		0.1L, 0.12L, 0.14L, 0.16L, 0.08L, 0.04L);
-	long double normalization = 0;
+	auto unbalanced = branch_length::jc69_msc::unbalanced(
+		0.1L, 0.2L, 0.3L, 0.05L);
+	auto balanced = branch_length::jc69_msc::balanced(
+		0.1L, 0.15L, 0.3L, 0.05L);
+	constexpr std::array<long double, 15> pythonUnbalanced = {{
+		0.09697429164261531L, 0.015846430736900327L,
+		0.00841624532035207L, 0.00486956158346461L,
+		0.002127472693899086L, 0.0043983387594188515L,
+		0.0010549684206337423L, 0.0007913167299622781L,
+		0.0010549684206337423L, 0.0043983387594188515L,
+		0.0007913167299622789L, 0.0004834429716501758L,
+		0.00048344297165017655L, 0.0005850996707013489L,
+		0.00022276695799432466L
+	}};
+	constexpr std::array<long double, 15> pythonBalanced = {{
+		0.10091452415975577L, 0.007102834481305252L,
+		0.007102834481305252L, 0.013761087009090579L,
+		0.002053508108883654L, 0.004983284088776595L,
+		0.0006184507986972812L, 0.00040922911793954024L,
+		0.0006184507986972812L, 0.004983284088776596L,
+		0.00040922911793954013L, 0.00040922911793954024L,
+		0.00040922911793954013L, 0.001372034312085861L,
+		0.0002000075406552963L
+	}};
+	long double unbalancedNormalization = 0;
+	long double balancedNormalization = 0;
 	std::array<long double, 15> expectedCounts{};
-	for (std::size_t i = 0; i < probabilities.size(); ++i) {
-		assert(probabilities[i] > 0);
-		normalization += multiplicity[i] * probabilities[i];
-		expectedCounts[i] = 100000 * multiplicity[i] * probabilities[i];
+	for (std::size_t i = 0; i < unbalanced.size(); ++i) {
+		assert(unbalanced[i] > 0);
+		assert(balanced[i] > 0);
+		assert(std::abs(unbalanced[i] - pythonUnbalanced[i]) < 2e-15L);
+		assert(std::abs(balanced[i] - pythonBalanced[i]) < 2e-15L);
+		unbalancedNormalization += multiplicity[i] * unbalanced[i];
+		balancedNormalization += multiplicity[i] * balanced[i];
+		expectedCounts[i] =
+			1000000 * multiplicity[i] * unbalanced[i];
 	}
-	assert(std::abs(normalization - 1) < 1e-12L);
-	auto fit = branch_length::Estimator<decltype(expectedCounts)>::fit(expectedCounts);
+	assert(std::abs(unbalancedNormalization - 1) < 1e-12L);
+	assert(std::abs(balancedNormalization - 1) < 1e-12L);
+
+	constexpr std::array<long double, 15> benchmarkCounts = {{
+		996435, 1776, 593, 192, 0,
+		442, 57, 0, 53, 452,
+		0, 0, 0, 0, 0
+	}};
+	long double fixedLogLikelihood = 0;
+	for (std::size_t i = 0; i < unbalanced.size(); ++i)
+		if (benchmarkCounts[i])
+			fixedLogLikelihood +=
+				benchmarkCounts[i] * std::log(unbalanced[i]);
+	assert(
+		std::abs(fixedLogLikelihood + 2341813.05389320L) < 1e-6L
+	);
+
+	auto fit = branch_length::Estimator<decltype(expectedCounts)>::fit(
+		expectedCounts, branch_length::RootedQuartetShape::UNBALANCED);
 	assert(fit.success);
-	assert(std::abs(fit.focalSubstitution - 0.08L) < 5e-3L);
-	assert(std::abs(fit.theta - 0.04L) < 5e-3L);
+	assert(std::abs(fit.focalSubstitution - 0.1L) < 5e-3L);
+	assert(std::abs(fit.theta - 0.05L) < 5e-3L);
+}
+
+static void testPythonBenchmarkFit() {
+	// Exact pooled A,B,C,D counts from the generated 1 Mb JC69 quartet:
+	// /simulation/jc_1mb_n4/simulated_alignment_1mb.fasta.
+	// The Python reference, with the same 200 iterations and five restarts,
+	// estimates focal SU=0.0001390646 and theta=0.0005450746.
+	std::array<long double, 15> counts = {{
+		996435, 1776, 593, 192, 0,
+		442, 57, 0, 53, 452,
+		0, 0, 0, 0, 0
+	}};
+	auto fit = branch_length::Estimator<decltype(counts)>::fit(
+		counts, branch_length::RootedQuartetShape::UNBALANCED);
+	assert(fit.success);
+	assert(std::abs(fit.focalSubstitution - 0.0001390646L) < 5e-9L);
+	assert(std::abs(fit.theta - 0.0005450746L) < 5e-9L);
 }
 
 static void testPositionalPermutationSymmetry() {
-	const long double a = 0.031L;
-	const long double b = 0.047L;
-	const long double c = 0.059L;
-	const long double d = 0.071L;
-	const long double t = 0.083L;
 	const long double theta = 0.097L;
-	const auto p = branch_length::jc69_msc::probabilities(a, b, c, d, t, theta);
-	const auto pSwapAB = branch_length::jc69_msc::probabilities(b, a, c, d, t, theta);
-	const auto pSwapCherries = branch_length::jc69_msc::probabilities(c, d, a, b, t, theta);
+	const auto unbalanced = branch_length::jc69_msc::unbalanced(
+		0.031L, 0.083L, 0.17L, theta);
+	const auto balanced = branch_length::jc69_msc::balanced(
+		0.031L, 0.047L, 0.17L, theta);
+	const auto balancedSwapCherries =
+		branch_length::jc69_msc::balanced(
+			0.047L, 0.031L, 0.17L, theta);
 
 	for (std::size_t xA = 0; xA < 4; ++xA)
 	for (std::size_t xB = 0; xB < 4; ++xB)
@@ -134,14 +195,23 @@ static void testPositionalPermutationSymmetry() {
 		const auto original = canonicalClass({{xA, xB, xC, xD}});
 		const auto swapAB = canonicalClass({{xB, xA, xC, xD}});
 		const auto swapCherries = canonicalClass({{xC, xD, xA, xB}});
-		assert(std::abs(p[original] - pSwapAB[swapAB]) < 2e-12L);
-		assert(std::abs(p[original] - pSwapCherries[swapCherries]) < 2e-12L);
+		assert(
+			std::abs(unbalanced[original] - unbalanced[swapAB]) <
+			2e-12L
+		);
+		assert(
+			std::abs(
+				balanced[original] -
+				balancedSwapCherries[swapCherries]
+			) < 2e-12L
+		);
 	}
 }
 
 int main() {
 	testPooledCounts();
 	testProbabilitiesAndOptimizer();
+	testPythonBenchmarkFit();
 	testPositionalPermutationSymmetry();
 	std::cout << "branch-length tests passed\n";
 }

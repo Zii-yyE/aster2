@@ -77,6 +77,21 @@ int main(int argc, char* argv[]) {
 		size_t nRounds = ARG.get<size_t>("initial-round");
 		size_t nSubsequent = ARG.get<size_t>("subsequent-round");
 
+		#ifdef CASTER
+		if (ARG.has("root")) {
+			bool rootObserved = false;
+			for (auto const& element : stepwiseColorSharedConstData.elements)
+				if (element.hasTaxon(0)) {
+					rootObserved = true;
+					break;
+				}
+			if (!rootObserved)
+				throw std::invalid_argument(
+					"The --root outgroup was not found in the alignment."
+				);
+		}
+		#endif
+
 		ARG.log() << "#Taxa: " << nTaxa << endl;
 		ARG.log() << "#Elements: " << stepwiseColorSharedConstData.nElements() << endl;
 		ARG.log() << "#Threads: " << nThreads << endl;
@@ -104,8 +119,13 @@ int main(int argc, char* argv[]) {
 		ARG.log() << "Time after support annotation: " << (std::chrono::duration_cast<std::chrono::minutes>(Clock::now() - start)).count() << " minute(s)" << std::endl;
 
 		#ifdef CASTER
-		if constexpr(stepwise_colorable::QUADRIPARTITION_STEPWISE_COLORABLE<Color>) {
-			branch_length::Procedure<Color>::annotate(stepwiseColorSharedConstData, tree, nThreads, 0);
+		if (ARG.has("root")) {
+			if constexpr(stepwise_colorable::QUADRIPARTITION_STEPWISE_COLORABLE<Color>) {
+				branch_length::Procedure<Color>::annotate(stepwiseColorSharedConstData, tree, nThreads, 0);
+			}
+		}
+		else {
+			ARG.log() << "Skipping MSC+JC69 branch lengths: provide --root with a valid outgroup." << endl;
 		}
 		#endif
 
