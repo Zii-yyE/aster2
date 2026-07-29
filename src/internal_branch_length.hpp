@@ -1,10 +1,10 @@
-#ifndef BRANCH_LENGTH_HPP
-#define BRANCH_LENGTH_HPP
+#ifndef INTERNAL_BRANCH_LENGTH_HPP
+#define INTERNAL_BRANCH_LENGTH_HPP
 
 #include "jc69_msc_probabilities.hpp"
 #include "nni_algorithm.hpp"
 
-namespace branch_length {
+namespace internal_branch_length {
 
 using std::array;
 using std::size_t;
@@ -153,10 +153,10 @@ template<typename PatternCounts> class Estimator {
 			return std::numeric_limits<long double>::infinity();
 
 		auto probabilities = shape == RootedQuartetShape::UNBALANCED ?
-			jc69_msc::unbalanced(
+			branch_length::jc69_msc::unbalanced(
 				ages[0], ages[1], ages[2], theta
 			) :
-			jc69_msc::balanced(
+			branch_length::jc69_msc::balanced(
 				ages[0], ages[1], ages[2], theta
 			);
 		long double logLikelihood = 0;
@@ -496,6 +496,6 @@ public:
 	}
 };
 
-} // namespace branch_length
+} // namespace internal_branch_length
 
 #endif

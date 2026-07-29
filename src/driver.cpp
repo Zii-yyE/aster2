@@ -1,7 +1,7 @@
 #include "driver.hpp"
 #include "optimization_algorithm.hpp"
 #include "quadripartition_support.hpp"
-#include "branch_length.hpp"
+#include "internal_branch_length.hpp"
 #include "terminal_branch_length.hpp"
 
 #ifdef CASTER
@@ -122,7 +122,7 @@ int main(int argc, char* argv[]) {
 		#ifdef CASTER
 		if (ARG.has("root")) {
 			if constexpr(stepwise_colorable::QUADRIPARTITION_STEPWISE_COLORABLE<Color>) {
-				branch_length::Procedure<Color>::annotate(stepwiseColorSharedConstData, tree, nThreads, 0);
+				internal_branch_length::Procedure<Color>::annotate(stepwiseColorSharedConstData, tree, nThreads, 0);
 			}
 			terminal_branch_length::Procedure<Color>::annotate(
 				stepwiseColorSharedConstData, tree, nThreads, 0, 0
