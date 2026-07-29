@@ -2,6 +2,7 @@
 #include "optimization_algorithm.hpp"
 #include "quadripartition_support.hpp"
 #include "branch_length.hpp"
+#include "terminal_branch_length.hpp"
 
 #ifdef CASTER
 #include "caster.hpp"
@@ -123,6 +124,9 @@ int main(int argc, char* argv[]) {
 			if constexpr(stepwise_colorable::QUADRIPARTITION_STEPWISE_COLORABLE<Color>) {
 				branch_length::Procedure<Color>::annotate(stepwiseColorSharedConstData, tree, nThreads, 0);
 			}
+			terminal_branch_length::Procedure<Color>::annotate(
+				stepwiseColorSharedConstData, tree, nThreads, 0, 0
+			);
 		}
 		else {
 			ARG.log() << "Skipping MSC+JC69 branch lengths: provide --root with a valid outgroup." << endl;

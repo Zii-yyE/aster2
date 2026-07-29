@@ -1,5 +1,6 @@
 #include "../../src/caster.hpp"
 #include "../../src/branch_length.hpp"
+#include "../../src/terminal_branch_length.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -22,6 +23,25 @@ static std::size_t canonicalClass(std::array<std::size_t, 4> nucleotide) {
 		renamed[i] = mapping[nucleotide[i]];
 	}
 	for (std::size_t i = 0; i < classes.size(); ++i) if (renamed == classes[i]) return i;
+	std::abort();
+}
+
+static std::size_t canonicalTripletClass(
+	std::array<std::size_t, 3> nucleotide
+) {
+	static constexpr std::array<std::array<unsigned char, 3>, 5> classes = {{
+		{{0, 0, 0}}, {{0, 0, 1}}, {{0, 1, 0}},
+		{{0, 1, 1}}, {{0, 1, 2}}
+	}};
+	std::array<signed char, 4> mapping = {{-1, -1, -1, -1}};
+	std::array<unsigned char, 3> renamed{};
+	unsigned char next = 0;
+	for (std::size_t i = 0; i < 3; ++i) {
+		if (mapping[nucleotide[i]] == -1) mapping[nucleotide[i]] = next++;
+		renamed[i] = mapping[nucleotide[i]];
+	}
+	for (std::size_t i = 0; i < classes.size(); ++i)
+		if (renamed == classes[i]) return i;
 	std::abort();
 }
 
@@ -94,6 +114,116 @@ static void testPooledCounts() {
 	assert(pooled == brute);
 	assert(pooled[0] > 0);  // invariant sites were retained
 	assert(pooled[1] > 0);  // singleton class was retained
+
+	TestColor::TripletPatternCounts pooledTriplet{};
+	color.elementAccumulateTripletPatternCounts(
+		0, {{0, 1, 2}}, pooledTriplet
+	);
+	TestColor::TripletPatternCounts bruteTriplet{};
+	std::array<long double, 64> pooledTripletRaw{};
+	std::array<long double, 64> bruteTripletRaw{};
+	for (std::size_t site = 0; site < 6; ++site)
+	for (std::size_t a = 0; a < 4; ++a)
+	for (std::size_t b = 0; b < 4; ++b)
+	for (std::size_t c = 0; c < 4; ++c) {
+		const std::size_t raw = (a << 4) | (b << 2) | c;
+		long double groupA =
+			element.allCnts[0][site][a] + element.allCnts[1][site][a];
+		long double groupB =
+			element.allCnts[2][site][b] + element.allCnts[3][site][b];
+		long double groupC =
+			element.allCnts[4][site][c] + element.allCnts[5][site][c];
+		pooledTripletRaw[raw] += groupA * groupB * groupC;
+
+		for (std::size_t ta = 0; ta < 2; ++ta)
+		for (std::size_t tb = 2; tb < 4; ++tb)
+		for (std::size_t tc = 4; tc < 6; ++tc) {
+			long double contribution =
+				(long double)element.allCnts[ta][site][a] *
+				element.allCnts[tb][site][b] *
+				element.allCnts[tc][site][c];
+			bruteTripletRaw[raw] += contribution;
+			bruteTriplet[canonicalTripletClass({{a, b, c}})] +=
+				contribution;
+		}
+	}
+	assert(pooledTripletRaw == bruteTripletRaw);
+	assert(pooledTriplet == bruteTriplet);
+	assert(pooledTriplet[0] > 0);
+	assert(pooledTriplet[1] > 0);
+}
+
+static void testTerminalTraversalCounts() {
+	using Tree = common::AnnotatedBinaryTree;
+	TestColor::SharedConstData data;
+	TestColor::SharedConstData::Element element;
+	element.iAllGenomePosBegin = 0;
+	element.nAllPos = 6;
+	element.taxon2row.resize(4);
+	element.allCnts.resize(
+		4, std::vector<std::array<unsigned char, 4>>(6)
+	);
+	for (std::size_t i = 0; i < 4; ++i) element.taxon2row[i] = i;
+	std::array<std::array<int, 4>, 6> states = {{
+		{{0, 0, 0, 0}},
+		{{0, 0, 0, 1}},
+		{{0, 1, 2, 3}},
+		{{0, 1, 0, 1}},
+		{{0, -1, 2, 3}},
+		{{0, 1, 2, 3}}
+	}};
+	for (std::size_t site = 0; site < states.size(); ++site)
+	for (std::size_t taxon = 0; taxon < 4; ++taxon) {
+		int state = states[site][taxon];
+		if (state >= 0) element.allCnts[taxon][site][state]++;
+	}
+	element.allCnts[0][5][0]++;
+	data.elements.push_back(element);
+	data.nAllGenomePos = 6;
+
+	Tree tree;
+	Tree::Node* a = tree.emplaceRoot(
+		Tree::LEAF_ID, (std::size_t)0
+	);
+	a->emplaceAbove(Tree::LEAF_ID, (std::size_t)1);
+	tree.root()->emplaceAbove(Tree::LEAF_ID, (std::size_t)2);
+	Tree::Node* outgroup =
+		tree.root()->emplaceAbove(Tree::LEAF_ID, (std::size_t)3);
+
+	TestColor color(data, TestColor::SiteView::ALL_SITES);
+	using Traversal =
+		terminal_branch_length::PooledTripletTraversal<TestColor>;
+	Traversal::ThreadPool threadPool(1, 0, data.nElements());
+	Traversal traversal(color, threadPool, tree, outgroup);
+	auto pooledByLeaf = traversal.count();
+	assert(pooledByLeaf.size() == 4);
+
+	const std::array<std::array<std::vector<std::size_t>, 3>, 4> groups = {{
+		{{{{0}}, {{1}}, {{2, 3}}}},
+		{{{{1}}, {{0}}, {{2, 3}}}},
+		{{{{2}}, {{0, 1}}, {{3}}}},
+		{{{{0, 1}}, {{2}}, {{3}}}}
+	}};
+	std::array<TestColor::TripletPatternCounts, 4> brute{};
+	for (std::size_t focal = 0; focal < groups.size(); ++focal)
+	for (std::size_t site = 0; site < states.size(); ++site)
+	for (std::size_t x = 0; x < 4; ++x)
+	for (std::size_t y = 0; y < 4; ++y)
+	for (std::size_t z = 0; z < 4; ++z) {
+		long double groupX = 0, groupY = 0, groupZ = 0;
+		for (std::size_t taxon : groups[focal][0])
+			groupX += element.allCnts[taxon][site][x];
+		for (std::size_t taxon : groups[focal][1])
+			groupY += element.allCnts[taxon][site][y];
+		for (std::size_t taxon : groups[focal][2])
+			groupZ += element.allCnts[taxon][site][z];
+		brute[focal][canonicalTripletClass({{x, y, z}})] +=
+			groupX * groupY * groupZ;
+	}
+	for (auto const& [leaf, counts] : pooledByLeaf) {
+		std::size_t focal = leaf->get<std::size_t>(Tree::LEAF_ID);
+		assert(counts == brute[focal]);
+	}
 }
 
 static void testProbabilitiesAndOptimizer() {
@@ -161,6 +291,100 @@ static void testProbabilitiesAndOptimizer() {
 	assert(std::abs(fit.theta - 0.05L) < 5e-3L);
 }
 
+static void testTripletProbabilitiesAndOptimizer() {
+	constexpr std::array<int, 5> multiplicity = {{4, 12, 12, 12, 24}};
+	constexpr std::array<long double, 5> pythonTriplet = {{
+		0.144513583853316291L,
+		0.017540752291614852L,
+		0.0070359406399771500L,
+		0.0070359406399771516L,
+		0.00177475257199602591L
+	}};
+	auto triplet =
+		branch_length::jc69_msc::triplet(0.1L, 0.2L, 0.05L);
+	auto quartet1 =
+		branch_length::jc69_msc::unbalanced(
+			0.1L, 0.2L, 0.3L, 0.05L
+		);
+	auto quartet2 =
+		branch_length::jc69_msc::unbalanced(
+			0.1L, 0.2L, 0.9L, 0.05L
+		);
+	auto marginalize = [](auto const& quartet) {
+		return std::array<long double, 5> {{
+			quartet[0] + 3 * quartet[1],
+			quartet[2] + quartet[3] + 2 * quartet[4],
+			quartet[5] + quartet[6] + 2 * quartet[7],
+			quartet[8] + quartet[9] + 2 * quartet[10],
+			quartet[11] + quartet[12] + quartet[13] + quartet[14]
+		}};
+	};
+	auto marginal1 = marginalize(quartet1);
+	auto marginal2 = marginalize(quartet2);
+
+	long double normalization = 0;
+	std::array<long double, 5> expectedCounts{};
+	for (std::size_t i = 0; i < triplet.size(); ++i) {
+		assert(triplet[i] > 0);
+		assert(std::abs(triplet[i] - pythonTriplet[i]) < 2e-15L);
+		assert(std::abs(triplet[i] - marginal1[i]) < 2e-15L);
+		assert(std::abs(triplet[i] - marginal2[i]) < 2e-15L);
+		normalization += multiplicity[i] * triplet[i];
+		expectedCounts[i] =
+			1000000 * multiplicity[i] * triplet[i];
+	}
+	assert(std::abs(normalization - 1) < 1e-12L);
+	assert(std::abs(triplet[1] - triplet[2]) > 1e-3L);
+	constexpr std::array<std::array<long double, 3>, 3> points = {{
+		{{0.00025L, 0.00035L, 0.0005L}},
+		{{0.03L, 0.19L, 0.08L}},
+		{{0.4L, 0.9L, 0.7L}}
+	}};
+	for (auto point : points) {
+		auto probabilities =
+			branch_length::jc69_msc::triplet(
+				point[0], point[1], point[2]
+			);
+		long double sum = 0;
+		for (std::size_t i = 0; i < probabilities.size(); ++i) {
+			assert(probabilities[i] > 0);
+			sum += multiplicity[i] * probabilities[i];
+		}
+		assert(std::abs(sum - 1) < 2e-11L);
+	}
+
+	constexpr std::array<long double, 5> likelihoodCounts = {{
+		1000, 120, 80, 70, 30
+	}};
+	long double fixedLogLikelihood =
+		terminal_branch_length::Estimator<
+			decltype(likelihoodCounts)
+		>::logLikelihood(
+			likelihoodCounts, 0.1L, 0.2L, 0.05L
+		);
+	assert(
+		std::abs(fixedLogLikelihood + 3353.1005894591267L) < 1e-9L
+	);
+
+	auto fixedThetaFit =
+		terminal_branch_length::Estimator<
+			decltype(expectedCounts)
+		>::fit(expectedCounts, 0.05L);
+	assert(fixedThetaFit.success);
+	assert(std::abs(fixedThetaFit.speciesAges[0] - 0.1L) < 5e-3L);
+	assert(std::abs(fixedThetaFit.speciesAges[1] - 0.2L) < 5e-3L);
+	assert(std::abs(fixedThetaFit.theta - 0.05L) < 1e-15L);
+
+	auto jointFit =
+		terminal_branch_length::Estimator<
+			decltype(expectedCounts)
+		>::fit(expectedCounts);
+	assert(jointFit.success);
+	assert(std::abs(jointFit.speciesAges[0] - 0.1L) < 5e-3L);
+	assert(std::abs(jointFit.speciesAges[1] - 0.2L) < 5e-3L);
+	assert(std::abs(jointFit.theta - 0.05L) < 5e-3L);
+}
+
 static void testPythonBenchmarkFit() {
 	// Exact pooled A,B,C,D counts from the generated 1 Mb JC69 quartet:
 	// /simulation/jc_1mb_n4/simulated_alignment_1mb.fasta.
@@ -176,6 +400,47 @@ static void testPythonBenchmarkFit() {
 	assert(fit.success);
 	assert(std::abs(fit.focalSubstitution - 0.0001390646L) < 5e-9L);
 	assert(std::abs(fit.theta - 0.0005450746L) < 5e-9L);
+}
+
+static void testPythonTerminalBenchmarkFits() {
+	// Brute-force pooled triplet counts from the same 1 Mb alignment.
+	// The expected ages below come from the Python symbolic evaluator and
+	// dependency-free Nelder-Mead optimizer with theta fixed at the
+	// internal-quartet estimate.
+	constexpr long double theta = 0.0005450746L;
+	constexpr std::array<long double, 5> countsA = {{
+		1995239, 2753, 994, 1014, 0
+	}};
+	constexpr std::array<long double, 5> countsB = {{
+		1995239, 2753, 1014, 994, 0
+	}};
+	constexpr std::array<long double, 5> countsC = {{
+		1993764, 3662, 1278, 1296, 0
+	}};
+	constexpr std::array<long double, 5> countsD = {{
+		1993764, 3662, 1296, 1278, 0
+	}};
+	auto fitA =
+		terminal_branch_length::Estimator<decltype(countsA)>::fit(
+			countsA, theta
+		);
+	auto fitB =
+		terminal_branch_length::Estimator<decltype(countsB)>::fit(
+			countsB, theta
+		);
+	auto fitC =
+		terminal_branch_length::Estimator<decltype(countsC)>::fit(
+			countsC, theta
+		);
+	auto fitD =
+		terminal_branch_length::Estimator<decltype(countsD)>::fit(
+			countsD, theta
+		);
+	assert(fitA.success && fitB.success && fitC.success && fitD.success);
+	assert(std::abs(fitA.speciesAges[0] - 0.0002297817790L) < 2e-10L);
+	assert(std::abs(fitB.speciesAges[0] - 0.0002297798071L) < 2e-10L);
+	assert(std::abs(fitC.speciesAges[0] - 0.0003714579192L) < 2e-10L);
+	assert(std::abs(fitD.speciesAges[1] - 0.0009664363384L) < 2e-10L);
 }
 
 static void testPositionalPermutationSymmetry() {
@@ -210,8 +475,11 @@ static void testPositionalPermutationSymmetry() {
 
 int main() {
 	testPooledCounts();
+	testTerminalTraversalCounts();
 	testProbabilitiesAndOptimizer();
+	testTripletProbabilitiesAndOptimizer();
 	testPythonBenchmarkFit();
+	testPythonTerminalBenchmarkFits();
 	testPositionalPermutationSymmetry();
 	std::cout << "branch-length tests passed\n";
 }

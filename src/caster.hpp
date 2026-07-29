@@ -49,6 +49,7 @@ public:
 	using score_t = Attributes::score_t;
 	using pattern_count_t = long double;
 	using PatternCounts = array<pattern_count_t, 15>;
+	using TripletPatternCounts = array<pattern_count_t, 5>;
 	enum class SiteView { TOPOLOGY, ALL_SITES };
 	static inline bool constexpr IS_ROOTED = false;
 	static inline score_t constexpr ZERO = Attributes::ZERO;
@@ -260,6 +261,62 @@ public:
 					(pattern_count_t)cnt[colorOrder[0]][a] * (pattern_count_t)cnt[colorOrder[1]][b] *
 					(pattern_count_t)cnt[colorOrder[2]][c] * (pattern_count_t)cnt[colorOrder[3]][d];
 				size_t raw = (a << 6) | (b << 4) | (c << 2) | d;
+				result[rawToClass[raw]] += contribution;
+			}
+		}
+	}
+
+	void elementAccumulateTripletPatternCounts(
+		size_t iElement,
+		array<size_t, 3> const& colorOrder,
+		TripletPatternCounts& result
+	) const noexcept {
+		static constexpr array<unsigned char, 64> rawToClass = []() constexpr {
+			array<unsigned char, 64> lookup{};
+			constexpr array<array<unsigned char, 3>, 5> classes = {{
+				{{0, 0, 0}}, {{0, 0, 1}}, {{0, 1, 0}},
+				{{0, 1, 1}}, {{0, 1, 2}}
+			}};
+			for (size_t raw = 0; raw < lookup.size(); raw++) {
+				array<unsigned char, 3> nucleotide = {{
+					(unsigned char)((raw >> 4) & 3),
+					(unsigned char)((raw >> 2) & 3),
+					(unsigned char)(raw & 3)
+				}};
+				array<unsigned char, 3> renamed{};
+				array<signed char, 4> mapping = {{-1, -1, -1, -1}};
+				unsigned char next = 0;
+				for (size_t i = 0; i < 3; i++) {
+					if (mapping[nucleotide[i]] == -1)
+						mapping[nucleotide[i]] = next++;
+					renamed[i] = (unsigned char)mapping[nucleotide[i]];
+				}
+				for (size_t iClass = 0; iClass < classes.size(); iClass++) {
+					if (renamed == classes[iClass]) {
+						lookup[raw] = (unsigned char)iClass;
+						break;
+					}
+				}
+			}
+			return lookup;
+		}();
+
+		typename SharedConstData::Element const& element =
+			sharedConstData.elements[iElement];
+		index_t begin = siteView == SiteView::TOPOLOGY ?
+			element.iGenomePosBegin : element.iAllGenomePosBegin;
+		index_t nPos = siteView == SiteView::TOPOLOGY ?
+			element.nPos : element.nAllPos;
+		for (index_t iPos : iota((index_t)0, nPos)) {
+			auto const& cnt = colorCnts[begin + iPos];
+			for (size_t a = 0; a < 4; a++)
+			for (size_t b = 0; b < 4; b++)
+			for (size_t c = 0; c < 4; c++) {
+				pattern_count_t contribution =
+					(pattern_count_t)cnt[colorOrder[0]][a] *
+					(pattern_count_t)cnt[colorOrder[1]][b] *
+					(pattern_count_t)cnt[colorOrder[2]][c];
+				size_t raw = (a << 4) | (b << 2) | c;
 				result[rawToClass[raw]] += contribution;
 			}
 		}

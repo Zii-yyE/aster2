@@ -75,9 +75,25 @@ The CLI writes three files:
 
 ## Integration Notes
 
-The estimator intentionally does not depend on code outside this folder. For aster2 integration,
-start from `global_theta_jc69_estimator.py` and decide whether the quartet probability engine should
-remain Python-side or be ported/reimplemented in the aster2 language/runtime.
+`generate_cpp_probabilities.py` evaluates the symbolic engine and writes the
+dependency-free rooted-quartet functions used by aster2 in
+`src/jc69_msc_probabilities.hpp`.
+
+The same generated header also exposes the rooted-triplet probabilities for
+`((A,B),C)` with species ages `s1 < s2`. They are exact marginals of the
+unbalanced quartet `(((A,B),C),D)`:
+
+```text
+AAA = AAAA + 3 AAAC
+AAC = AACA + AACC + 2 AACG
+ACA = ACAA + ACAC + 2 ACAG
+ACC = ACCA + ACCC + 2 ACCG
+ACG = ACGA + ACGC + ACGG + ACGT
+```
+
+Sampling consistency removes the older quartet age, leaving only `s1`, `s2`,
+and `theta`. The pattern positions remain A/B/C throughout; only nucleotide
+states are canonically renamed.
 
 Important algorithmic boundary: this is a quartet-composite branch-stitching estimator, not a full
 n-taxon likelihood. Branch estimates are stitched from quartet fits and then summarized on the full
