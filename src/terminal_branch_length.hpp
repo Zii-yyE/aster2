@@ -569,6 +569,20 @@ public:
 				(double)fit.logLikelihood
 			);
 			fittedNodes.push_back(leaf);
+			if (focalIsOutgroup) {
+				// The same rooted triplet supplies the other child edge
+				// of the root. If its ages are t1<t2, the outgroup
+				// pendant is t2 and the ingroup-to-root stem is t2-t1.
+				long double rootStem =
+					fit.speciesAges[1] - fit.speciesAges[0];
+				ingroup->set("length", (double)rootStem);
+				ingroup->set("theta_used", (double)fit.theta);
+				ingroup->set(
+					"branch_length_log_likelihood",
+					(double)fit.logLikelihood
+				);
+				fittedNodes.push_back(ingroup);
+			}
 			fittedThetas.push_back(fit.theta);
 		}
 

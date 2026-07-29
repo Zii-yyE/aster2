@@ -224,6 +224,33 @@ static void testTerminalTraversalCounts() {
 		std::size_t focal = leaf->get<std::size_t>(Tree::LEAF_ID);
 		assert(counts == brute[focal]);
 	}
+
+	// Simulate the internal pass having annotated AB->ABC, then ensure the
+	// terminal pass fills every remaining rooted branch, including
+	// ABC->root from the outgroup triplet.
+	Tree::Node* ingroup =
+		tree.root()->leftChild() == outgroup ?
+		tree.root()->rightChild() : tree.root()->leftChild();
+	Tree::Node* lowerInternal = ingroup->leftChild()->isLeaf() ?
+		ingroup->rightChild() : ingroup->leftChild();
+	lowerInternal->set("length", 0.01);
+	lowerInternal->set("length_cu", 0.4);
+	tree.set("theta", 0.05);
+	terminal_branch_length::Procedure<TestColor>::annotate(
+		data, tree, 1, 3, 100
+	);
+	std::size_t annotatedBranches = 0;
+	for (Tree::Node* node : tree.nodes()) {
+		if (node == tree.root()) {
+			assert(!node->has<double>("length"));
+			continue;
+		}
+		assert(node->has<double>("length"));
+		assert(node->has<double>("length_cu"));
+		assert(node->get<double>("length") > 0);
+		++annotatedBranches;
+	}
+	assert(annotatedBranches == 6);
 }
 
 static void testProbabilitiesAndOptimizer() {
@@ -441,6 +468,12 @@ static void testPythonTerminalBenchmarkFits() {
 	assert(std::abs(fitB.speciesAges[0] - 0.0002297798071L) < 2e-10L);
 	assert(std::abs(fitC.speciesAges[0] - 0.0003714579192L) < 2e-10L);
 	assert(std::abs(fitD.speciesAges[1] - 0.0009664363384L) < 2e-10L);
+	assert(
+		std::abs(
+			(fitD.speciesAges[1] - fitD.speciesAges[0]) -
+			0.0005949757741L
+		) < 2e-10L
+	);
 }
 
 static void testPositionalPermutationSymmetry() {
