@@ -560,9 +560,9 @@ public:
 			// For an ordinary leaf, the leaf/sibling split occurs at s1.
 			// The outgroup itself is the C lineage in ((A,B),C), so its
 			// pendant branch extends from the present to s2.
-			long double focalSubstitution = focalIsOutgroup ?
+			long double focalBranchSU = focalIsOutgroup ?
 				fit.speciesAges[1] : fit.speciesAges[0];
-			leaf->set("length", (double)focalSubstitution);
+			leaf->set("length", (double)focalBranchSU);
 			leaf->set("theta_used", (double)fit.theta);
 			leaf->set(
 				"terminal_branch_length_log_likelihood",

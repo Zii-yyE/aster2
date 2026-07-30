@@ -17,7 +17,7 @@ struct FitResult {
 	bool success = false;
 	long double logLikelihood =
 		-std::numeric_limits<long double>::infinity();
-	long double focalSubstitution = 0;
+	long double focalBranchSU = 0;
 	long double theta = 0;
 	array<long double, 3> speciesAges{};
 };
@@ -415,7 +415,7 @@ public:
 				"internal edge." << std::endl;
 			return;
 		}
-		node->set("length", (double)fit.focalSubstitution);
+		node->set("length", (double)fit.focalBranchSU);
 		node->set("theta_local", (double)fit.theta);
 		node->set(
 			"branch_length_log_likelihood",
