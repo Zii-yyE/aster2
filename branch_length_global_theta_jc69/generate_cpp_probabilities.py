@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate dependency-free rooted-quartet MSC+JC69 C++ evaluators."""
+"""Generate the dependency-free rooted MSC+JC69 C++ evaluator."""
 
 from __future__ import annotations
 
@@ -29,10 +29,7 @@ PATTERNS = (
     "ACCG", "ACGA", "ACGC", "ACGG", "ACGT",
 )
 
-TOPOLOGIES = (
-    ("balanced", "((A,B),(C,D));"),
-    ("unbalanced", "(((A,B),C),D);"),
-)
+UNBALANCED_TOPOLOGY = "(((A,B),C),D);"
 
 
 def cpp(expr: sp.Expr) -> str:
@@ -128,8 +125,7 @@ def main() -> None:
         "// positions are A,B,C. Positional order is never permuted.",
         "",
     ]
-    for name, topology in TOPOLOGIES:
-        lines.extend(evaluator(name, topology))
+    lines.extend(evaluator("unbalanced", UNBALANCED_TOPOLOGY))
     lines.extend(triplet_evaluator())
     lines.extend([
         "} // namespace branch_length::jc69_msc",

@@ -11,8 +11,6 @@ using std::size_t;
 using std::string;
 using std::vector;
 
-enum class RootedQuartetShape { BALANCED, UNBALANCED };
-
 struct FitResult {
 	bool success = false;
 	long double logLikelihood =
@@ -62,8 +60,7 @@ template<typename PatternCounts> class Estimator {
 	}
 
 	static array<long double, 4> initialParameters(
-		PatternCounts const& counts,
-		RootedQuartetShape shape
+		PatternCounts const& counts
 	) noexcept {
 		array<long double, 6> distances = pairwiseDistances(counts);
 		long double validSum = 0;
@@ -79,41 +76,24 @@ template<typename PatternCounts> class Estimator {
 		for (long double& value : distances)
 			if (value < 0) value = fallback;
 
-		// Pair order is AB, AC, AD, BC, BD, CD. These reproduce the
-		// representative-leaf age initialization in the Python estimator.
+		// Pair order is AB, AC, AD, BC, BD, CD. For (((A,B),C),D),
+		// these reproduce the representative-leaf age initialization in
+		// the Python estimator.
 		long double age1 = std::max(distances[0] / 2, 1e-6L);
-		long double age2;
-		long double age3;
-		array<long double, 4> result{};
-		if (shape == RootedQuartetShape::UNBALANCED) {
-			age2 = std::max(distances[1] / 2, age1 + 1e-6L);
-			age3 = std::max(distances[2] / 2, age2 + 1e-6L);
-			result = {{
-				std::log(age1),
-				std::log(age2 - age1),
-				std::log(age3 - age2),
-				std::log(std::max(fallback, 1e-3L))
-			}};
-		}
-		else {
-			age2 = std::max(distances[5] / 2, 1e-6L);
-			age3 = std::max(
-				distances[1] / 2,
-				std::max(age1, age2) + 1e-6L
-			);
-			result = {{
-				std::log(age1),
-				std::log(age2),
-				std::log(age3 - std::max(age1, age2)),
-				std::log(std::max(fallback, 1e-3L))
-			}};
-		}
-		return result;
+		long double age2 =
+			std::max(distances[1] / 2, age1 + 1e-6L);
+		long double age3 =
+			std::max(distances[2] / 2, age2 + 1e-6L);
+		return {{
+			std::log(age1),
+			std::log(age2 - age1),
+			std::log(age3 - age2),
+			std::log(std::max(fallback, 1e-3L))
+		}};
 	}
 
 	static bool unpack(
 		vector<long double> const& params,
-		RootedQuartetShape shape,
 		array<long double, 3>& speciesAges,
 		long double& theta
 	) noexcept {
@@ -129,36 +109,24 @@ template<typename PatternCounts> class Estimator {
 			positive[i] = std::exp(params[i]);
 		}
 		speciesAges[0] = positive[0];
-		if (shape == RootedQuartetShape::UNBALANCED) {
-			speciesAges[1] = speciesAges[0] + positive[1];
-			speciesAges[2] = speciesAges[1] + positive[2];
-		}
-		else {
-			speciesAges[1] = positive[1];
-			speciesAges[2] =
-				std::max(speciesAges[0], speciesAges[1]) + positive[2];
-		}
+		speciesAges[1] = speciesAges[0] + positive[1];
+		speciesAges[2] = speciesAges[1] + positive[2];
 		theta = positive[3];
 		return true;
 	}
 
 	static long double objective(
 		PatternCounts const& counts,
-		vector<long double> const& params,
-		RootedQuartetShape shape
+		vector<long double> const& params
 	) noexcept {
 		array<long double, 3> ages{};
 		long double theta = 0;
-		if (!unpack(params, shape, ages, theta))
+		if (!unpack(params, ages, theta))
 			return std::numeric_limits<long double>::infinity();
 
-		auto probabilities = shape == RootedQuartetShape::UNBALANCED ?
-			branch_length::jc69_msc::unbalanced(
-				ages[0], ages[1], ages[2], theta
-			) :
-			branch_length::jc69_msc::balanced(
-				ages[0], ages[1], ages[2], theta
-			);
+		auto probabilities = branch_length::jc69_msc::unbalanced(
+			ages[0], ages[1], ages[2], theta
+		);
 		long double logLikelihood = 0;
 		for (size_t i = 0; i < counts.size(); ++i) {
 			long double probability = probabilities[i];
@@ -174,7 +142,6 @@ template<typename PatternCounts> class Estimator {
 	nelderMead(
 		PatternCounts const& counts,
 		vector<long double> const& initial,
-		RootedQuartetShape shape,
 		size_t maxIterations = 200
 	) noexcept {
 		constexpr long double STEP = 0.5L;
@@ -186,7 +153,7 @@ template<typename PatternCounts> class Estimator {
 			simplex[i + 1][i] += STEP;
 		vector<long double> values;
 		for (auto const& point : simplex)
-			values.push_back(objective(counts, point, shape));
+			values.push_back(objective(counts, point));
 
 		size_t iteration = 0;
 		while (iteration < maxIterations) {
@@ -241,7 +208,7 @@ template<typename PatternCounts> class Estimator {
 			vector<long double> reflected =
 				combine(centroid, simplex[n], -1);
 			long double reflectedValue =
-				objective(counts, reflected, shape);
+				objective(counts, reflected);
 			if (
 				values[0] <= reflectedValue &&
 				reflectedValue < values[n - 1]
@@ -255,7 +222,7 @@ template<typename PatternCounts> class Estimator {
 				vector<long double> expanded =
 					combine(centroid, reflected, 2);
 				long double expandedValue =
-					objective(counts, expanded, shape);
+					objective(counts, expanded);
 				if (expandedValue < reflectedValue) {
 					simplex[n] = std::move(expanded);
 					values[n] = expandedValue;
@@ -271,7 +238,7 @@ template<typename PatternCounts> class Estimator {
 			vector<long double> contracted =
 				combine(centroid, simplex[n], 0.5L);
 			long double contractedValue =
-				objective(counts, contracted, shape);
+				objective(counts, contracted);
 			if (contractedValue < values[n]) {
 				simplex[n] = std::move(contracted);
 				values[n] = contractedValue;
@@ -282,7 +249,7 @@ template<typename PatternCounts> class Estimator {
 			for (size_t i = 1; i <= n; ++i) {
 				simplex[i] =
 					combine(simplex[0], simplex[i], 0.5L);
-				values[i] = objective(counts, simplex[i], shape);
+				values[i] = objective(counts, simplex[i]);
 			}
 			++iteration;
 		}
@@ -295,16 +262,14 @@ template<typename PatternCounts> class Estimator {
 
 public:
 	static FitResult fit(
-		PatternCounts const& counts,
-		RootedQuartetShape shape =
-			RootedQuartetShape::UNBALANCED
+		PatternCounts const& counts
 	) noexcept {
 		long double total = 0;
 		for (long double count : counts) total += count;
 		if (!(total > 0) || !std::isfinite(total)) return {};
 
 		array<long double, 4> base =
-			initialParameters(counts, shape);
+			initialParameters(counts);
 		constexpr array<long double, 5> THETA_SCALES = {{
 			0.01L, 0.1L, 1, 10, 100
 		}};
@@ -315,7 +280,7 @@ public:
 			vector<long double> start(base.begin(), base.end());
 			start.back() += std::log(thetaScale);
 			auto [point, value, iterations] =
-				nelderMead(counts, start, shape);
+				nelderMead(counts, start);
 			(void)iterations;
 			if (value < bestValue) {
 				bestValue = value;
@@ -326,13 +291,10 @@ public:
 
 		array<long double, 3> ages{};
 		long double theta = 0;
-		if (!unpack(bestPoint, shape, ages, theta)) return {};
-		long double focal =
-			shape == RootedQuartetShape::UNBALANCED ?
-			ages[1] - ages[0] :
-			(ages[2] - ages[0]) + (ages[2] - ages[1]);
-		if (focal <= 0 || theta <= 0) return {};
-		return {true, -bestValue, focal, theta, ages};
+		if (!unpack(bestPoint, ages, theta)) return {};
+		long double focalBranchSU = ages[1] - ages[0];
+		if (focalBranchSU <= 0 || theta <= 0) return {};
+		return {true, -bestValue, focalBranchSU, theta, ages};
 	}
 };
 
@@ -406,7 +368,7 @@ public:
 	) noexcept {
 		++attempted;
 		FitResult fit = Estimator<PatternCounts>::fit(
-			primary.counts, RootedQuartetShape::UNBALANCED
+			primary.counts
 		);
 		if (!fit.success) {
 			++failed;
