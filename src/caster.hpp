@@ -47,6 +47,10 @@ template<STEPWISE_COLOR_ATTRIBUTES Attributes> class Color{
 
 public:
 	using score_t = Attributes::score_t;
+	using pattern_count_t = long double;
+	using PatternCounts = array<pattern_count_t, 15>;
+	using TripletPatternCounts = array<pattern_count_t, 5>;
+	enum class SiteView { TOPOLOGY, ALL_SITES };
 	static inline bool constexpr IS_ROOTED = false;
 	static inline score_t constexpr ZERO = Attributes::ZERO;
 	static inline score_t constexpr EPSILON = Attributes::EPSILON;
@@ -58,6 +62,9 @@ public:
 			index_t iGenomePosBegin = 0;
 			index_t nPos = 0;
 			vector<vector<array<cnt_taxon_t, 4> > > cnts; // cnts[iRow][iPos][iNucleotide] -> count
+			index_t iAllGenomePosBegin = 0;
+			index_t nAllPos = 0;
+			vector<vector<array<cnt_taxon_t, 4> > > allCnts; // all A/C/G/T observations for likelihoods
 			vector<index_t> taxon2row; // taxon2row[iTaxon] -> iRow in cnts
 			array<score_t, 4> eqFreqs{}; // eqFreqs[iNucleotide]
 
@@ -68,22 +75,27 @@ public:
 
 		vector<Element> elements;
 		index_t nGenomePos = 0;
+		index_t nAllGenomePos = 0;
 
 		size_t nElements() const noexcept { return elements.size(); }
     };
 
 private:
 	SharedConstData const& sharedConstData;
+	SiteView siteView;
     vector<array<array<cnt_t, 4>, 4> > colorCnts; // colorCnts[iGenomePos][iColor][iNucleotide] -> count
 
 	template<bool isSet> inline void elementSetOrClearTaxonColor(size_t iElement, size_t iTaxon, size_t iColor) noexcept{
 		typename SharedConstData::Element const& element = sharedConstData.elements[iElement];
 		if (!element.hasTaxon(iTaxon)) return;
 		index_t iRow = element.taxon2row[iTaxon];
-		for (index_t iPos : iota((index_t)0, element.nPos)){
+		index_t iGenomePosBegin = siteView == SiteView::TOPOLOGY ? element.iGenomePosBegin : element.iAllGenomePosBegin;
+		index_t nPos = siteView == SiteView::TOPOLOGY ? element.nPos : element.nAllPos;
+		auto const& cnts = siteView == SiteView::TOPOLOGY ? element.cnts : element.allCnts;
+		for (index_t iPos : iota((index_t)0, nPos)){
 			for (index_t iNucleotide : iota((index_t)0, (index_t)4)) {
-				cnt_t& colorCnt = colorCnts[element.iGenomePosBegin + iPos][iColor][iNucleotide];
-				cnt_t cnt = element.cnts[iRow][iPos][iNucleotide];
+				cnt_t& colorCnt = colorCnts[iGenomePosBegin + iPos][iColor][iNucleotide];
+				cnt_t cnt = cnts[iRow][iPos][iNucleotide];
 				if constexpr (isSet) colorCnt += cnt;
 				else colorCnt -= cnt;
 			}
@@ -203,7 +215,116 @@ public:
 		return res;
 	}
 
-	Color(SharedConstData const& data) noexcept : sharedConstData(data), colorCnts(data.nGenomePos) {}
+	void elementAccumulateQuartetPatternCounts(
+		size_t iElement,
+		array<size_t, 4> const& colorOrder,
+		PatternCounts& result
+	) const noexcept {
+		static constexpr array<unsigned char, 256> rawToClass = []() constexpr {
+			array<unsigned char, 256> lookup{};
+			constexpr array<array<unsigned char, 4>, 15> classes = {{
+				{{0, 0, 0, 0}}, {{0, 0, 0, 1}}, {{0, 0, 1, 0}}, {{0, 0, 1, 1}},
+				{{0, 0, 1, 2}}, {{0, 1, 0, 0}}, {{0, 1, 0, 1}}, {{0, 1, 0, 2}},
+				{{0, 1, 1, 0}}, {{0, 1, 1, 1}}, {{0, 1, 1, 2}}, {{0, 1, 2, 0}},
+				{{0, 1, 2, 1}}, {{0, 1, 2, 2}}, {{0, 1, 2, 3}}
+			}};
+			for (size_t raw = 0; raw < lookup.size(); raw++) {
+				array<unsigned char, 4> nucleotide = {{
+					(unsigned char)((raw >> 6) & 3), (unsigned char)((raw >> 4) & 3),
+					(unsigned char)((raw >> 2) & 3), (unsigned char)(raw & 3)
+				}};
+				array<unsigned char, 4> renamed{};
+				array<signed char, 4> mapping = {{-1, -1, -1, -1}};
+				unsigned char next = 0;
+				for (size_t i = 0; i < 4; i++) {
+					if (mapping[nucleotide[i]] == -1) mapping[nucleotide[i]] = next++;
+					renamed[i] = (unsigned char)mapping[nucleotide[i]];
+				}
+				for (size_t iClass = 0; iClass < classes.size(); iClass++) {
+					if (renamed == classes[iClass]) {
+						lookup[raw] = (unsigned char)iClass;
+						break;
+					}
+				}
+			}
+			return lookup;
+		}();
+
+		typename SharedConstData::Element const& element = sharedConstData.elements[iElement];
+		index_t begin = siteView == SiteView::TOPOLOGY ? element.iGenomePosBegin : element.iAllGenomePosBegin;
+		index_t nPos = siteView == SiteView::TOPOLOGY ? element.nPos : element.nAllPos;
+		for (index_t iPos : iota((index_t)0, nPos)) {
+			auto const& cnt = colorCnts[begin + iPos];
+			for (size_t a = 0; a < 4; a++) for (size_t b = 0; b < 4; b++)
+			for (size_t c = 0; c < 4; c++) for (size_t d = 0; d < 4; d++) {
+				pattern_count_t contribution =
+					(pattern_count_t)cnt[colorOrder[0]][a] * (pattern_count_t)cnt[colorOrder[1]][b] *
+					(pattern_count_t)cnt[colorOrder[2]][c] * (pattern_count_t)cnt[colorOrder[3]][d];
+				size_t raw = (a << 6) | (b << 4) | (c << 2) | d;
+				result[rawToClass[raw]] += contribution;
+			}
+		}
+	}
+
+	void elementAccumulateTripletPatternCounts(
+		size_t iElement,
+		array<size_t, 3> const& colorOrder,
+		TripletPatternCounts& result
+	) const noexcept {
+		static constexpr array<unsigned char, 64> rawToClass = []() constexpr {
+			array<unsigned char, 64> lookup{};
+			constexpr array<array<unsigned char, 3>, 5> classes = {{
+				{{0, 0, 0}}, {{0, 0, 1}}, {{0, 1, 0}},
+				{{0, 1, 1}}, {{0, 1, 2}}
+			}};
+			for (size_t raw = 0; raw < lookup.size(); raw++) {
+				array<unsigned char, 3> nucleotide = {{
+					(unsigned char)((raw >> 4) & 3),
+					(unsigned char)((raw >> 2) & 3),
+					(unsigned char)(raw & 3)
+				}};
+				array<unsigned char, 3> renamed{};
+				array<signed char, 4> mapping = {{-1, -1, -1, -1}};
+				unsigned char next = 0;
+				for (size_t i = 0; i < 3; i++) {
+					if (mapping[nucleotide[i]] == -1)
+						mapping[nucleotide[i]] = next++;
+					renamed[i] = (unsigned char)mapping[nucleotide[i]];
+				}
+				for (size_t iClass = 0; iClass < classes.size(); iClass++) {
+					if (renamed == classes[iClass]) {
+						lookup[raw] = (unsigned char)iClass;
+						break;
+					}
+				}
+			}
+			return lookup;
+		}();
+
+		typename SharedConstData::Element const& element =
+			sharedConstData.elements[iElement];
+		index_t begin = siteView == SiteView::TOPOLOGY ?
+			element.iGenomePosBegin : element.iAllGenomePosBegin;
+		index_t nPos = siteView == SiteView::TOPOLOGY ?
+			element.nPos : element.nAllPos;
+		for (index_t iPos : iota((index_t)0, nPos)) {
+			auto const& cnt = colorCnts[begin + iPos];
+			for (size_t a = 0; a < 4; a++)
+			for (size_t b = 0; b < 4; b++)
+			for (size_t c = 0; c < 4; c++) {
+				pattern_count_t contribution =
+					(pattern_count_t)cnt[colorOrder[0]][a] *
+					(pattern_count_t)cnt[colorOrder[1]][b] *
+					(pattern_count_t)cnt[colorOrder[2]][c];
+				size_t raw = (a << 4) | (b << 2) | c;
+				result[rawToClass[raw]] += contribution;
+			}
+		}
+	}
+
+	Color(SharedConstData const& data, SiteView view = SiteView::TOPOLOGY) noexcept :
+		sharedConstData(data), siteView(view),
+		colorCnts(view == SiteView::TOPOLOGY ? data.nGenomePos : data.nAllGenomePos) {}
 
 	template<typename DataClasses> friend DataClasses DriverHelper::read();
 };
@@ -245,6 +366,7 @@ template<typename DataClass> DataClass read() {
 		size_t chunkMaxSize = ARG.get<size_t>("chunk");
 		size_t nChunk = (nSites + chunkMaxSize - 1) / chunkMaxSize;
 		vector<vector<size_t> > sites(nChunk);
+		vector<pair<size_t, size_t> > allSiteRanges(nChunk);
 		vector<array<double, 4> > eqfreq;
 		size_t iElementBegin = sharedConstData.elements.size();
 		unordered_map<size_t, size_t> taxon2row;
@@ -301,6 +423,7 @@ template<typename DataClass> DataClass read() {
 
 			for (size_t i = 0; i < nChunk; i++) {
 				size_t s = i * nSites / nChunk, t = (i + 1) * nSites / nChunk;
+				allSiteRanges[i] = {s, t};
 				array<size_t, 4> sumFreq = {};
 				for (size_t j = s; j < t; j++) {
 					sumFreq += freq[j];
@@ -322,10 +445,14 @@ template<typename DataClass> DataClass read() {
 			element.iGenomePosBegin = sharedConstData.nGenomePos;
 			element.nPos = sites[i].size();
 			element.cnts.resize(taxon2row.size(), vector<array<typename DataClass::ParentClass::cnt_taxon_t, 4> >(element.nPos));
+			element.iAllGenomePosBegin = sharedConstData.nAllGenomePos;
+			element.nAllPos = allSiteRanges[i].second - allSiteRanges[i].first;
+			element.allCnts.resize(taxon2row.size(), vector<array<typename DataClass::ParentClass::cnt_taxon_t, 4> >(element.nAllPos));
 			element.taxon2row.resize(common::taxonName2ID.nTaxa(), -1);
 			element.eqFreqs = eqfreq[i];
 			sharedConstData.elements.push_back(element);
 			sharedConstData.nGenomePos += element.nPos;
+			sharedConstData.nAllGenomePos += element.nAllPos;
 		}
 
 		while (AP2.nextSeq()) {
@@ -341,6 +468,15 @@ template<typename DataClass> DataClass read() {
 						case 'C': element.cnts[iRow][iPos][1] += 1; break;
 						case 'G': element.cnts[iRow][iPos][2] += 1; break;
 						case 'T': element.cnts[iRow][iPos][3] += 1; break;
+					}
+				}
+				size_t allSiteBegin = allSiteRanges[iChunk].first;
+				for (size_t iPos : iota((size_t) 0, (size_t)element.nAllPos)) {
+					switch (seq[allSiteBegin + iPos]) {
+						case 'A': element.allCnts[iRow][iPos][0] += 1; break;
+						case 'C': element.allCnts[iRow][iPos][1] += 1; break;
+						case 'G': element.allCnts[iRow][iPos][2] += 1; break;
+						case 'T': element.allCnts[iRow][iPos][3] += 1; break;
 					}
 				}
 			}
