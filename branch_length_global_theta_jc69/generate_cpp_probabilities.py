@@ -29,7 +29,7 @@ PATTERNS = (
     "ACCG", "ACGA", "ACGC", "ACGG", "ACGT",
 )
 
-UNBALANCED_TOPOLOGY = "(((A,B),C),D);"
+ROOTED_QUARTET_TOPOLOGY = "(((A,B),C),D);"
 
 
 def cpp(expr: sp.Expr) -> str:
@@ -94,13 +94,18 @@ def triplet_evaluator() -> list[str]:
         "    // Marginalize D from (((A,B),C),D). Sampling consistency",
         "    // removes the arbitrary older age; s3=s2+theta is only a",
         "    // numerically convenient representative of that marginal.",
-        "    const auto quartet = unbalanced(s1, s2, s2 + theta, theta);",
+        "    const auto quartetProbabilities =",
+        "        rootedQuartet(s1, s2, s2 + theta, theta);",
         "    return {{",
-        "        quartet[0] + 3 * quartet[1],",
-        "        quartet[2] + quartet[3] + 2 * quartet[4],",
-        "        quartet[5] + quartet[6] + 2 * quartet[7],",
-        "        quartet[8] + quartet[9] + 2 * quartet[10],",
-        "        quartet[11] + quartet[12] + quartet[13] + quartet[14]",
+        "        quartetProbabilities[0] + 3 * quartetProbabilities[1],",
+        "        quartetProbabilities[2] + quartetProbabilities[3]",
+        "            + 2 * quartetProbabilities[4],",
+        "        quartetProbabilities[5] + quartetProbabilities[6]",
+        "            + 2 * quartetProbabilities[7],",
+        "        quartetProbabilities[8] + quartetProbabilities[9]",
+        "            + 2 * quartetProbabilities[10],",
+        "        quartetProbabilities[11] + quartetProbabilities[12]",
+        "            + quartetProbabilities[13] + quartetProbabilities[14]",
         "    }};",
         "}",
         "",
@@ -125,7 +130,7 @@ def main() -> None:
         "// positions are A,B,C. Positional order is never permuted.",
         "",
     ]
-    lines.extend(evaluator("unbalanced", UNBALANCED_TOPOLOGY))
+    lines.extend(evaluator("rootedQuartet", ROOTED_QUARTET_TOPOLOGY))
     lines.extend(triplet_evaluator())
     lines.extend([
         "} // namespace branch_length::jc69_msc",

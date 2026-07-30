@@ -17,7 +17,7 @@ struct FitResult {
 		-std::numeric_limits<long double>::infinity();
 	long double focalBranchSU = 0;
 	long double theta = 0;
-	array<long double, 3> speciesAges{};
+	array<long double, 3> speciesAgesSU{};
 };
 
 template<typename PatternCounts> class Estimator {
@@ -29,72 +29,77 @@ template<typename PatternCounts> class Estimator {
 		{{0, 1, 2, 1}}, {{0, 1, 2, 2}}, {{0, 1, 2, 3}}
 	}};
 
-	static long double correctedDistance(
+	static long double jc69DistanceSU(
 		long double mismatchFraction
 	) noexcept {
 		if (mismatchFraction < 0 || mismatchFraction >= 0.75L)
 			return -1;
-		long double remaining = 1 - 4 * mismatchFraction / 3;
-		return remaining > 0 ? -0.75L * std::log(remaining) : -1;
+		long double jc69LogArgument = 1 - 4 * mismatchFraction / 3;
+		return jc69LogArgument > 0 ?
+			-0.75L * std::log(jc69LogArgument) : -1;
 	}
 
-	static array<long double, 6> pairwiseDistances(
-		PatternCounts const& counts
+	static array<long double, 6> pairwiseDistancesSU(
+		PatternCounts const& patternCounts
 	) noexcept {
-		long double total = 0;
-		for (long double count : counts) total += count;
+		long double totalCount = 0;
+		for (long double count : patternCounts) totalCount += count;
 
-		array<long double, 6> distances{};
+		array<long double, 6> distancesSU{};
 		size_t iPair = 0;
 		for (size_t i = 0; i < 4; ++i) {
 			for (size_t j = i + 1; j < 4; ++j) {
-				long double mismatch = 0;
+				long double mismatchCount = 0;
 				for (size_t k = 0; k < CLASSES.size(); ++k)
 					if (CLASSES[k][i] != CLASSES[k][j])
-						mismatch += counts[k];
-				distances[iPair++] =
-					correctedDistance(mismatch / total);
+						mismatchCount += patternCounts[k];
+				distancesSU[iPair++] =
+					jc69DistanceSU(mismatchCount / totalCount);
 			}
 		}
-		return distances;
+		return distancesSU;
 	}
 
-	static array<long double, 4> initialParameters(
-		PatternCounts const& counts
+	static array<long double, 4> initialLogParameters(
+		PatternCounts const& patternCounts
 	) noexcept {
-		array<long double, 6> distances = pairwiseDistances(counts);
-		long double validSum = 0;
-		size_t nValid = 0;
-		for (long double value : distances) {
+		array<long double, 6> distancesSU =
+			pairwiseDistancesSU(patternCounts);
+		long double validDistanceSumSU = 0;
+		size_t nValidDistances = 0;
+		for (long double value : distancesSU) {
 			if (value >= 0) {
-				validSum += value;
-				++nValid;
+				validDistanceSumSU += value;
+				++nValidDistances;
 			}
 		}
-		long double fallback =
-			nValid ? std::max(validSum / nValid, 0.05L) : 0.1L;
-		for (long double& value : distances)
-			if (value < 0) value = fallback;
+		long double fallbackDistanceSU = nValidDistances ?
+			std::max(
+				validDistanceSumSU / nValidDistances, 0.05L
+			) : 0.1L;
+		for (long double& value : distancesSU)
+			if (value < 0) value = fallbackDistanceSU;
 
 		// Pair order is AB, AC, AD, BC, BD, CD. For (((A,B),C),D),
 		// these reproduce the representative-leaf age initialization in
 		// the Python estimator.
-		long double age1 = std::max(distances[0] / 2, 1e-6L);
-		long double age2 =
-			std::max(distances[1] / 2, age1 + 1e-6L);
-		long double age3 =
-			std::max(distances[2] / 2, age2 + 1e-6L);
+		long double ageABSU =
+			std::max(distancesSU[0] / 2, 1e-6L);
+		long double ageABCSU =
+			std::max(distancesSU[1] / 2, ageABSU + 1e-6L);
+		long double ageABCDSU =
+			std::max(distancesSU[2] / 2, ageABCSU + 1e-6L);
 		return {{
-			std::log(age1),
-			std::log(age2 - age1),
-			std::log(age3 - age2),
-			std::log(std::max(fallback, 1e-3L))
+			std::log(ageABSU),
+			std::log(ageABCSU - ageABSU),
+			std::log(ageABCDSU - ageABCSU),
+			std::log(std::max(fallbackDistanceSU, 1e-3L))
 		}};
 	}
 
-	static bool unpack(
-		vector<long double> const& params,
-		array<long double, 3>& speciesAges,
+	static bool unpackLogParameters(
+		vector<long double> const& logParameters,
+		array<long double, 3>& speciesAgesSU,
 		long double& theta
 	) noexcept {
 		// ASTER2 is compiled with -Ofast, whose finite-math assumptions make
@@ -102,58 +107,72 @@ template<typename PatternCounts> class Estimator {
 		// so every subsequently evaluated model parameter stays finite.
 		constexpr long double LOG_MIN = -30;
 		constexpr long double LOG_MAX = 10;
-		array<long double, 4> positive{};
-		for (size_t i = 0; i < positive.size(); ++i) {
-			if (params[i] < LOG_MIN || params[i] > LOG_MAX)
+		array<long double, 4> positiveParameters{};
+		for (size_t i = 0; i < positiveParameters.size(); ++i) {
+			if (
+				logParameters[i] < LOG_MIN ||
+				logParameters[i] > LOG_MAX
+			)
 				return false;
-			positive[i] = std::exp(params[i]);
+			positiveParameters[i] = std::exp(logParameters[i]);
 		}
-		speciesAges[0] = positive[0];
-		speciesAges[1] = speciesAges[0] + positive[1];
-		speciesAges[2] = speciesAges[1] + positive[2];
-		theta = positive[3];
+		speciesAgesSU[0] = positiveParameters[0];
+		speciesAgesSU[1] =
+			speciesAgesSU[0] + positiveParameters[1];
+		speciesAgesSU[2] =
+			speciesAgesSU[1] + positiveParameters[2];
+		theta = positiveParameters[3];
 		return true;
 	}
 
-	static long double objective(
-		PatternCounts const& counts,
-		vector<long double> const& params
+	static long double negativeLogLikelihood(
+		PatternCounts const& patternCounts,
+		vector<long double> const& logParameters
 	) noexcept {
-		array<long double, 3> ages{};
+		array<long double, 3> speciesAgesSU{};
 		long double theta = 0;
-		if (!unpack(params, ages, theta))
+		if (!unpackLogParameters(
+			logParameters, speciesAgesSU, theta
+		))
 			return std::numeric_limits<long double>::infinity();
 
-		auto probabilities = branch_length::jc69_msc::unbalanced(
-			ages[0], ages[1], ages[2], theta
-		);
+		auto patternProbabilities =
+			branch_length::jc69_msc::rootedQuartet(
+				speciesAgesSU[0], speciesAgesSU[1],
+				speciesAgesSU[2], theta
+			);
 		long double logLikelihood = 0;
-		for (size_t i = 0; i < counts.size(); ++i) {
-			long double probability = probabilities[i];
-			if (!(probability > 0))
+		for (size_t i = 0; i < patternCounts.size(); ++i) {
+			long double patternProbability = patternProbabilities[i];
+			if (!(patternProbability > 0))
 				return std::numeric_limits<long double>::infinity();
-			if (counts[i] != 0)
-				logLikelihood += counts[i] * std::log(probability);
+			if (patternCounts[i] != 0)
+				logLikelihood +=
+					patternCounts[i] * std::log(patternProbability);
 		}
 		return -logLikelihood;
 	}
 
 	static std::tuple<vector<long double>, long double, size_t>
 	nelderMead(
-		PatternCounts const& counts,
-		vector<long double> const& initial,
+		PatternCounts const& patternCounts,
+		vector<long double> const& initialLogParameters,
 		size_t maxIterations = 200
 	) noexcept {
 		constexpr long double STEP = 0.5L;
 		constexpr long double X_TOL = 1e-4L;
 		constexpr long double F_TOL = 1e-6L;
-		size_t n = initial.size();
-		vector<vector<long double>> simplex(n + 1, initial);
+		size_t n = initialLogParameters.size();
+		vector<vector<long double>> simplex(
+			n + 1, initialLogParameters
+		);
 		for (size_t i = 0; i < n; ++i)
 			simplex[i + 1][i] += STEP;
 		vector<long double> values;
 		for (auto const& point : simplex)
-			values.push_back(objective(counts, point));
+			values.push_back(
+				negativeLogLikelihood(patternCounts, point)
+			);
 
 		size_t iteration = 0;
 		while (iteration < maxIterations) {
@@ -208,7 +227,7 @@ template<typename PatternCounts> class Estimator {
 			vector<long double> reflected =
 				combine(centroid, simplex[n], -1);
 			long double reflectedValue =
-				objective(counts, reflected);
+				negativeLogLikelihood(patternCounts, reflected);
 			if (
 				values[0] <= reflectedValue &&
 				reflectedValue < values[n - 1]
@@ -222,7 +241,7 @@ template<typename PatternCounts> class Estimator {
 				vector<long double> expanded =
 					combine(centroid, reflected, 2);
 				long double expandedValue =
-					objective(counts, expanded);
+					negativeLogLikelihood(patternCounts, expanded);
 				if (expandedValue < reflectedValue) {
 					simplex[n] = std::move(expanded);
 					values[n] = expandedValue;
@@ -238,7 +257,7 @@ template<typename PatternCounts> class Estimator {
 			vector<long double> contracted =
 				combine(centroid, simplex[n], 0.5L);
 			long double contractedValue =
-				objective(counts, contracted);
+				negativeLogLikelihood(patternCounts, contracted);
 			if (contractedValue < values[n]) {
 				simplex[n] = std::move(contracted);
 				values[n] = contractedValue;
@@ -249,7 +268,8 @@ template<typename PatternCounts> class Estimator {
 			for (size_t i = 1; i <= n; ++i) {
 				simplex[i] =
 					combine(simplex[0], simplex[i], 0.5L);
-				values[i] = objective(counts, simplex[i]);
+				values[i] =
+					negativeLogLikelihood(patternCounts, simplex[i]);
 			}
 			++iteration;
 		}
@@ -262,39 +282,55 @@ template<typename PatternCounts> class Estimator {
 
 public:
 	static FitResult fit(
-		PatternCounts const& counts
+		PatternCounts const& patternCounts
 	) noexcept {
-		long double total = 0;
-		for (long double count : counts) total += count;
-		if (!(total > 0) || !std::isfinite(total)) return {};
+		long double totalCount = 0;
+		for (long double count : patternCounts) totalCount += count;
+		if (!(totalCount > 0) || !std::isfinite(totalCount)) return {};
 
-		array<long double, 4> base =
-			initialParameters(counts);
+		array<long double, 4> initialLogParameters =
+			Estimator::initialLogParameters(patternCounts);
 		constexpr array<long double, 5> THETA_SCALES = {{
 			0.01L, 0.1L, 1, 10, 100
 		}};
-		vector<long double> bestPoint;
-		long double bestValue =
+		vector<long double> bestLogParameters;
+		long double bestNegativeLogLikelihood =
 			std::numeric_limits<long double>::infinity();
 		for (long double thetaScale : THETA_SCALES) {
-			vector<long double> start(base.begin(), base.end());
-			start.back() += std::log(thetaScale);
-			auto [point, value, iterations] =
-				nelderMead(counts, start);
+			vector<long double> restartLogParameters(
+				initialLogParameters.begin(), initialLogParameters.end()
+			);
+			restartLogParameters.back() += std::log(thetaScale);
+			auto [
+				fittedLogParameters,
+				fittedNegativeLogLikelihood,
+				iterations
+			] = nelderMead(patternCounts, restartLogParameters);
 			(void)iterations;
-			if (value < bestValue) {
-				bestValue = value;
-				bestPoint = std::move(point);
+			if (
+				fittedNegativeLogLikelihood <
+				bestNegativeLogLikelihood
+			) {
+				bestNegativeLogLikelihood =
+					fittedNegativeLogLikelihood;
+				bestLogParameters =
+					std::move(fittedLogParameters);
 			}
 		}
-		if (bestPoint.empty()) return {};
+		if (bestLogParameters.empty()) return {};
 
-		array<long double, 3> ages{};
+		array<long double, 3> speciesAgesSU{};
 		long double theta = 0;
-		if (!unpack(bestPoint, ages, theta)) return {};
-		long double focalBranchSU = ages[1] - ages[0];
+		if (!unpackLogParameters(
+			bestLogParameters, speciesAgesSU, theta
+		)) return {};
+		long double focalBranchSU =
+			speciesAgesSU[1] - speciesAgesSU[0];
 		if (focalBranchSU <= 0 || theta <= 0) return {};
-		return {true, -bestValue, focalBranchSU, theta, ages};
+		return {
+			true, -bestNegativeLogLikelihood, focalBranchSU,
+			theta, speciesAgesSU
+		};
 	}
 };
 
@@ -307,46 +343,46 @@ public:
 		"Rooted internal branch lengths (MSC+JC69)";
 
 private:
-	PatternCounts counts{};
+	PatternCounts patternCounts{};
 	static inline vector<common::AnnotatedBinaryTree::Node*> fittedNodes;
-	static inline vector<long double> fittedThetas;
-	static inline size_t attempted = 0;
-	static inline size_t failed = 0;
+	static inline vector<long double> fittedLocalThetas;
+	static inline size_t attemptedFits = 0;
+	static inline size_t failedFits = 0;
 
 	explicit PooledPatternCounts(
-		PatternCounts const& counts
-	) noexcept : counts(counts) {}
+		PatternCounts const& countsToPool
+	) noexcept : patternCounts(countsToPool) {}
 
 public:
 	PooledPatternCounts() noexcept = default;
 
 	static void initialize() noexcept {
 		fittedNodes.clear();
-		fittedThetas.clear();
-		attempted = 0;
-		failed = 0;
+		fittedLocalThetas.clear();
+		attemptedFits = 0;
+		failedFits = 0;
 	}
 
 	static array<PooledPatternCounts, 3> map(
 		Color& color, size_t iElement
 	) noexcept {
-		PatternCounts topology0{}, topology1{}, topology2{};
+		PatternCounts pair23Counts{}, pair13Counts{}, pair12Counts{};
 		// Color 0 is the root-side part containing the outgroup. For each
 		// unrooted split, order the opposite pair as the youngest cherry:
 		// (((A,B),C),D).
 		color.elementAccumulateQuartetPatternCounts(
-			iElement, {{2, 3, 1, 0}}, topology0
+			iElement, {{2, 3, 1, 0}}, pair23Counts
 		);
 		color.elementAccumulateQuartetPatternCounts(
-			iElement, {{1, 3, 2, 0}}, topology1
+			iElement, {{1, 3, 2, 0}}, pair13Counts
 		);
 		color.elementAccumulateQuartetPatternCounts(
-			iElement, {{1, 2, 3, 0}}, topology2
+			iElement, {{1, 2, 3, 0}}, pair12Counts
 		);
 		return {{
-			PooledPatternCounts(topology0),
-			PooledPatternCounts(topology1),
-			PooledPatternCounts(topology2)
+			PooledPatternCounts(pair23Counts),
+			PooledPatternCounts(pair13Counts),
+			PooledPatternCounts(pair12Counts)
 		}};
 	}
 
@@ -355,8 +391,9 @@ public:
 		PooledPatternCounts const& b
 	) noexcept {
 		PooledPatternCounts result;
-		for (size_t i = 0; i < result.counts.size(); ++i)
-			result.counts[i] = a.counts[i] + b.counts[i];
+		for (size_t i = 0; i < result.patternCounts.size(); ++i)
+			result.patternCounts[i] =
+				a.patternCounts[i] + b.patternCounts[i];
 		return result;
 	}
 
@@ -366,12 +403,12 @@ public:
 		PooledPatternCounts const&,
 		PooledPatternCounts const&
 	) noexcept {
-		++attempted;
+		++attemptedFits;
 		FitResult fit = Estimator<PatternCounts>::fit(
-			primary.counts
+			primary.patternCounts
 		);
 		if (!fit.success) {
-			++failed;
+			++failedFits;
 			common::LogInfo(-1).log()
 				<< "Rooted branch-length optimization failed for one "
 				"internal edge." << std::endl;
@@ -384,37 +421,41 @@ public:
 			(double)fit.logLikelihood
 		);
 		fittedNodes.push_back(node);
-		fittedThetas.push_back(fit.theta);
+		fittedLocalThetas.push_back(fit.theta);
 	}
 
 	static void finalize(common::AnnotatedBinaryTree& tree) {
-		if (attempted == 0) return;
-		if (fittedThetas.empty()) {
+		if (attemptedFits == 0) return;
+		if (fittedLocalThetas.empty()) {
 			throw std::runtime_error(
 				"Rooted internal branch-length optimization failed "
 				"for every edge."
 			);
 		}
-		std::sort(fittedThetas.begin(), fittedThetas.end());
-		size_t middle = fittedThetas.size() / 2;
-		long double globalTheta = fittedThetas.size() % 2 ?
-			fittedThetas[middle] :
-			(fittedThetas[middle - 1] + fittedThetas[middle]) / 2;
+		std::sort(fittedLocalThetas.begin(), fittedLocalThetas.end());
+		size_t medianIndex = fittedLocalThetas.size() / 2;
+		long double globalTheta = fittedLocalThetas.size() % 2 ?
+			fittedLocalThetas[medianIndex] :
+			(
+				fittedLocalThetas[medianIndex - 1] +
+				fittedLocalThetas[medianIndex]
+			) / 2;
 		tree.set("theta", (double)globalTheta);
 		for (auto* node : fittedNodes) {
-			long double substitution = node->get<double>("length");
+			long double branchSU = node->get<double>("length");
 			node->set(
 				"length_cu",
-				(double)(2 * substitution / globalTheta)
+				(double)(2 * branchSU / globalTheta)
 			);
 		}
 		common::LogInfo(0).log()
 			<< "Estimated global theta (median of "
-			<< fittedThetas.size() << " rooted internal-edge fits): "
+			<< fittedLocalThetas.size()
+			<< " rooted internal-edge fits): "
 			<< (double)globalTheta << std::endl;
-		if (failed) {
+		if (failedFits) {
 			common::LogInfo(-1).log()
-				<< failed << " of " << attempted
+				<< failedFits << " of " << attemptedFits
 				<< " rooted internal branch-length fits failed."
 				<< std::endl;
 		}

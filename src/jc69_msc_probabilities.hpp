@@ -11,7 +11,7 @@ namespace branch_length::jc69_msc {
 // theta=4*Ne*mu. Quartet positions are A,B,C,D; triplet
 // positions are A,B,C. Positional order is never permuted.
 
-inline std::array<long double, 15> unbalanced(
+inline std::array<long double, 15> rootedQuartet(
     long double s1, long double s2, long double s3,
     long double theta) noexcept {
     const long double x0 = (8.0/3.0)*s3;
@@ -572,13 +572,18 @@ inline std::array<long double, 5> triplet(
     // Marginalize D from (((A,B),C),D). Sampling consistency
     // removes the arbitrary older age; s3=s2+theta is only a
     // numerically convenient representative of that marginal.
-    const auto quartet = unbalanced(s1, s2, s2 + theta, theta);
+    const auto quartetProbabilities =
+        rootedQuartet(s1, s2, s2 + theta, theta);
     return {{
-        quartet[0] + 3 * quartet[1],
-        quartet[2] + quartet[3] + 2 * quartet[4],
-        quartet[5] + quartet[6] + 2 * quartet[7],
-        quartet[8] + quartet[9] + 2 * quartet[10],
-        quartet[11] + quartet[12] + quartet[13] + quartet[14]
+        quartetProbabilities[0] + 3 * quartetProbabilities[1],
+        quartetProbabilities[2] + quartetProbabilities[3]
+            + 2 * quartetProbabilities[4],
+        quartetProbabilities[5] + quartetProbabilities[6]
+            + 2 * quartetProbabilities[7],
+        quartetProbabilities[8] + quartetProbabilities[9]
+            + 2 * quartetProbabilities[10],
+        quartetProbabilities[11] + quartetProbabilities[12]
+            + quartetProbabilities[13] + quartetProbabilities[14]
     }};
 }
 
