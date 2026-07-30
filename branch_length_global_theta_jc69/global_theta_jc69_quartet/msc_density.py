@@ -640,17 +640,6 @@ def msc_density_quartet_from_newicks(
     }
 
 
-def msc_density_balanced_from_newicks(species_newick: str, gene_newick: str) -> Dict[str, Any]:
-    """
-    Backward-compatible wrapper kept for existing callers.
-    """
-    out = msc_density_quartet_from_newicks(species_newick, gene_newick)
-    out["relation"] = (
-        "concordant" if out["species_split"] == out["gene_split"] else "discordant"
-    )
-    return out
-
-
 def _build_cli() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Compute symbolic quartet MSC density f((G,t)|(S,tau)) from species and gene Newick trees."
